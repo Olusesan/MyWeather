@@ -18,11 +18,24 @@
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, assign) CGFloat screenHeight;
 @property (nonatomic, strong) CLLocationManager *locationManager;
+@property (nonatomic, strong) NSDateFormatter *hourlyFormatter;
+@property (nonatomic, strong) NSDateFormatter *dailyFormatter;
 
 
 @end
 
 @implementation ViewController
+
+- (id)init {
+    if (self = [super init]) {
+        _hourlyFormatter = [[NSDateFormatter alloc] init];
+        _hourlyFormatter.dateFormat = @"h a";
+        
+        _dailyFormatter = [[NSDateFormatter alloc] init];
+        _dailyFormatter.dateFormat = @"EEEE";
+    }
+    return self;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -123,6 +136,8 @@
     iconView.backgroundColor = [UIColor whiteColor];
     [header addSubview:iconView];
     
+    [[WManager sharedManager] findCurrentLocation];
+    
     [[RACObserve([WManager sharedManager], currentCondition)
       deliverOn:RACScheduler.mainThreadScheduler]
      subscribeNext:^(WCondition *newCondition) {
@@ -131,9 +146,30 @@
          cityLabel.text = [newCondition.locationName capitalizedString];
          iconView.image = [UIImage imageNamed:[newCondition imageName]];
      }];
-      
     
-    [[WManager sharedManager] findCurrentLocation];
+    RAC(hiloLabel, text) = [[RACSignal combineLatest:@[
+// 2
+    RACObserve([WManager sharedManager], currentCondition.tempHigh),
+    RACObserve([WManager sharedManager], currentCondition.tempLow)]
+// 3
+    reduce:^(NSNumber *hi, NSNumber *low) {
+    return [NSString  stringWithFormat:@"%.0f° / %.0f°",hi.floatValue,low.floatValue];
+                                              }]
+// 4
+                            deliverOn:RACScheduler.mainThreadScheduler];
+    
+    
+    [[RACObserve([WManager sharedManager], hourlyForecast)
+      deliverOn:RACScheduler.mainThreadScheduler]
+     subscribeNext:^(NSArray *newForecast) {
+         [self.tableView reloadData];
+     }];
+    
+    [[RACObserve([WManager sharedManager], dailyForecast)
+      deliverOn:RACScheduler.mainThreadScheduler]
+     subscribeNext:^(NSArray *newForecast) {
+         [self.tableView reloadData];
+     }];
     
     self.locationManager = [[CLLocationManager alloc] init];
     self.locationManager.delegate = self;
@@ -162,8 +198,14 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    // TODO: Return count of forecast
-    return 0;
+    // 1
+    if (section == 0) {
+        return MIN([[WManager sharedManager].hourlyForecast count], 6) + 1;
+    }
+    // 2
+    return MIN([[WManager sharedManager].dailyForecast count], 6) + 1;
+    
+    
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -180,7 +222,29 @@
     cell.textLabel.textColor = [UIColor whiteColor];
     cell.detailTextLabel.textColor = [UIColor whiteColor];
     
-    // TODO: Setup the cell
+    if (indexPath.section == 0) {
+        // 1
+        if (indexPath.row == 0) {
+            [self configureHeaderCell:cell title:@"Hourly Forecast"];
+        }
+        else {
+            // 2
+            WCondition *weather = [WManager sharedManager].hourlyForecast[indexPath.row - 1];
+            [self configureHourlyCell:cell weather:weather];
+        }
+    }
+    else if (indexPath.section == 1) {
+        // 1
+        if (indexPath.row == 0) {
+            [self configureHeaderCell:cell title:@"Daily Forecast"];
+        }
+        else {
+            // 3
+            WCondition *weather = [WManager sharedManager].dailyForecast[indexPath.row - 1];
+            [self configureDailyCell:cell weather:weather];
+        }
+    }
+    
     
     return cell;
 }
@@ -205,6 +269,35 @@
 - (void)didReceiveMemoryWarning {
     [super didReceiveMemoryWarning];
     // Dispose of any resources that can be recreated.
+}
+
+- (void)configureHeaderCell:(UITableViewCell *)cell title:(NSString *)title {
+    cell.textLabel.font = [UIFont fontWithName:@"HelveticaNeue-Medium" size:18];
+    cell.textLabel.text = title;
+    cell.detailTextLabel.text = @"";
+    cell.imageView.image = nil;
+}
+
+// 2
+- (void)configureHourlyCell:(UITableViewCell *)cell weather:(WCondition *)weather {
+    cell.textLabel.font = [UIFont fontWithName:@"HelveticaNeue-Light" size:18];
+    cell.detailTextLabel.font = [UIFont fontWithName:@"HelveticaNeue-Medium" size:18];
+    cell.textLabel.text = [self.hourlyFormatter stringFromDate:weather.date];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f°",weather.temperature.floatValue];
+    cell.imageView.image = [UIImage imageNamed:[weather imageName]];
+    cell.imageView.contentMode = UIViewContentModeScaleAspectFit;
+}
+
+// 3
+- (void)configureDailyCell:(UITableViewCell *)cell weather:(WCondition *)weather {
+    cell.textLabel.font = [UIFont fontWithName:@"HelveticaNeue-Light" size:18];
+    cell.detailTextLabel.font = [UIFont fontWithName:@"HelveticaNeue-Medium" size:18];
+    cell.textLabel.text = [self.dailyFormatter stringFromDate:weather.date];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f° / %.0f°",
+                                 weather.tempHigh.floatValue,
+                                 weather.tempLow.floatValue];
+    cell.imageView.image = [UIImage imageNamed:[weather imageName]];
+    cell.imageView.contentMode = UIViewContentModeScaleAspectFit;
 }
 
 @end
